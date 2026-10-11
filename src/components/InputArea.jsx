@@ -1,98 +1,100 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import PropTypes from 'prop-types';
+import Icon from './Icon';
+import { isSendKey } from '../lib/composer';
 
-const InputArea = ({ onSendMessage, isGenerating, onCancel, onClear }) => {
-    const [input, setInput] = useState('');
-    const textareaRef = useRef(null);
+const MAX_HEIGHT = 200; // keep in sync with .composer-input max-height in index.css
 
-    useEffect(() => {
-        if (textareaRef.current) {
-            textareaRef.current.style.height = 'auto';
-            textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
-        }
-    }, [input]);
+const STATUS_TEXT = {
+  connecting: 'Connecting to Mitra AI…',
+  generating: 'Mitra AI is thinking…',
+  streaming: 'Mitra AI is responding…',
+};
 
-    const handleSubmit = (e) => {
-        e.preventDefault();
-        if (isGenerating) {
-            onCancel();
-            return;
-        }
-        if (input.trim()) {
-            onSendMessage(input.trim());
-            setInput('');
-            // Reset height
-            if (textareaRef.current) {
-                textareaRef.current.style.height = 'auto';
-            }
-        }
-    };
+const InputArea = ({ value, onChange, onSend, onStop, isGenerating, phase, textareaRef }) => {
+  const localRef = useRef(null);
+  const ref = textareaRef ?? localRef;
+  const canSend = value.trim().length > 0 && !isGenerating;
 
-    const handleKeyDown = (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            handleSubmit(e);
-        }
-    };
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT)}px`;
+  }, [value, ref]);
 
-    return (
-        <footer className="input-area-container">
-            <form onSubmit={handleSubmit} className="input-form">
-                <div className="input-wrapper">
-                    {onClear && (
-                        <button
-                            type="button"
-                            onClick={onClear}
-                            disabled={isGenerating}
-                            className="clear-button"
-                            title="Clear Chat"
-                        >
-                            <svg viewBox="0 0 24 24" fill="none" width="18" height="18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <polyline points="3 6 5 6 21 6"></polyline>
-                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                            </svg>
-                        </button>
-                    )}
-                    <textarea
-                        ref={textareaRef}
-                        rows={1}
-                        placeholder={isGenerating ? "Wait for response..." : "Type a message..."}
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onKeyDown={handleKeyDown}
-                        disabled={isGenerating}
-                        className="chat-input"
-                    />
-                    <button
-                        type="submit"
-                        disabled={!isGenerating && !input.trim()}
-                        className="send-button"
-                        aria-label={isGenerating ? "Stop generating" : "Send message"}
-                        title={isGenerating ? "Stop generating" : "Send message"}
-                    >
-                        {isGenerating ? (
-                            // Square Stop Icon
-                            <svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                                <rect x="6" y="6" width="12" height="12" rx="2" />
-                            </svg>
-                        ) : (
-                            // Send Arrow Icon
-                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <path d="M2.01 21L23 12L2.01 3L2 10L17 12L2 14L2.01 21Z" fill="currentColor" />
-                            </svg>
-                        )}
-                    </button>
-                </div>
-            </form>
-        </footer>
-    );
+  const submit = () => {
+    const text = value.trim();
+    if (isGenerating || !text) return;
+    if (onSend(text) !== false) onChange('');
+  };
+
+  return (
+    <footer className="composer">
+      <form
+        className="composer-inner"
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+      >
+        <div className="composer-box">
+          <textarea
+            ref={ref}
+            className="composer-input"
+            rows={1}
+            value={value}
+            placeholder="Message Mitra AI"
+            aria-label="Message Mitra AI"
+            aria-describedby="composer-hint"
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (isSendKey(e)) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+          />
+          {isGenerating ? (
+            <button
+              type="button"
+              className="send-btn is-stop"
+              onClick={onStop}
+              aria-label="Stop generating"
+              title="Stop generating"
+            >
+              <Icon name="stop" size={16} filled />
+            </button>
+          ) : (
+            <button
+              type="submit"
+              className="send-btn"
+              disabled={!canSend}
+              aria-label="Send message"
+              title="Send message"
+            >
+              <Icon name="send" size={18} strokeWidth={2} />
+            </button>
+          )}
+        </div>
+        <p id="composer-hint" className={`composer-hint ${isGenerating ? '' : 'is-keys'}`}>
+          {isGenerating
+            ? (STATUS_TEXT[phase] ?? 'Mitra AI is responding…')
+            : 'Enter to send · Shift+Enter for a new line'}
+        </p>
+      </form>
+    </footer>
+  );
 };
 
 InputArea.propTypes = {
-    onSendMessage: PropTypes.func.isRequired,
-    isGenerating: PropTypes.bool,
-    onCancel: PropTypes.func,
-    onClear: PropTypes.func
+  value: PropTypes.string.isRequired,
+  onChange: PropTypes.func.isRequired,
+  onSend: PropTypes.func.isRequired,
+  onStop: PropTypes.func.isRequired,
+  isGenerating: PropTypes.bool,
+  phase: PropTypes.string,
+  textareaRef: PropTypes.shape({ current: PropTypes.any }),
 };
 
 export default InputArea;

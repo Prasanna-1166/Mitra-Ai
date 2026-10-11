@@ -1,283 +1,237 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import BrandMark from './components/BrandMark';
 import ChatContainer from './components/ChatContainer';
+import ConfirmDialog from './components/ConfirmDialog';
+import Icon from './components/Icon';
 import InputArea from './components/InputArea';
 import Sidebar from './components/Sidebar';
+import { useChat } from './hooks/useChat';
+import { useMediaQuery } from './hooks/useMediaQuery';
+import { useTheme } from './hooks/useTheme';
+import { conversationToMarkdown, exportFilename } from './lib/chatState';
+import { downloadText } from './lib/download';
+
+const ANNOUNCEMENTS = {
+  connecting: 'Connecting to Mitra AI.',
+  generating: 'Mitra AI is thinking.',
+  streaming: 'Mitra AI is responding.',
+  complete: 'Response complete.',
+  stopped: 'Generation stopped.',
+  error: 'The request failed.',
+};
 
 const App = () => {
-  const [sessions, setSessions] = useState([]);
-  const [activeSessionId, setActiveSessionId] = useState(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false); // Replaces isTyping, but strictly for generation state
+  const { state, controller } = useChat();
+  const { theme, toggleTheme } = useTheme();
+  const isDesktop = useMediaQuery('(min-width: 861px)');
+  const [desktopCollapsed, setDesktopCollapsed] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [dialog, setDialog] = useState(null); // { type: 'clear' | 'delete' | 'deleteAll', id? }
+  const [draft, setDraft] = useState('');
+  const textareaRef = useRef(null);
+  const toggleRef = useRef(null);
 
-  const websocketRef = useRef(null);
-  const activeSessionRef = useRef(null); // Keep track of active session ID for callbacks
+  const { sessions, activeSessionId, request, outcome, welcomeErrors, storageWarning } = state;
+  const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
+  const messages = activeSession?.messages ?? [];
+  const isGenerating = Boolean(request);
 
-  // Configuration
-  const SYSTEM_PROMPT = "You are Mitra Ai, a friendly, intelligent, and helpful AI assistant designed to race through problems and find solutions fast.";
-  const APP_ID = "college-wife";
+  const sidebarOpen = isDesktop ? !desktopCollapsed : drawerOpen;
+  const drawerActive = !isDesktop && drawerOpen;
 
-  // Update ref when state changes
-  useEffect(() => {
-    activeSessionRef.current = activeSessionId;
-  }, [activeSessionId]);
-
-  // Initialize with one session if none exist
-  useEffect(() => {
-    if (sessions.length === 0) {
-      // Create initial session without triggering connect immediately, 
-      // relying on the handleNewChat logic
-      handleNewChat(true);
-    }
-  }, []);
-
-  const activeSession = sessions.find(s => s.id === activeSessionId) || { messages: [] };
-
-  // WebSocket Logic
-  const connectWebSocket = (message, initChat, currentSessionId) => {
-    setIsGenerating(true);
-    const url = "wss://backend.buildpicoapps.com/api/chatbot/chat";
-
-    // Close existing connection if any
-    if (websocketRef.current) {
-      websocketRef.current.close();
-    }
-
-    const ws = new WebSocket(url);
-    websocketRef.current = ws;
-
-    // Create a placeholder message for the AI response
-    const aiMsgId = crypto.randomUUID();
-    const aiMsg = {
-      id: aiMsgId,
-      role: 'assistant',
-      content: '', // Start empty, fill stream
-      timestamp: new Date().toISOString()
-    };
-
-    if (!initChat) {
-      setSessions(prev => prev.map(session => {
-        if (session.id === currentSessionId) {
-          return {
-            ...session,
-            messages: [...session.messages, aiMsg]
-          };
-        }
-        return session;
-      }));
-    }
-
-    ws.onopen = () => {
-      ws.send(JSON.stringify({
-        chatId: currentSessionId, // Use the session ID as chat ID
-        appId: APP_ID,
-        systemPrompt: SYSTEM_PROMPT,
-        message: initChat ? "A welcoming introduction from Mitra Ai" : message,
-      }));
-    };
-
-    ws.onmessage = (event) => {
-      // Append chunk to the latest message of the correct session
-      setSessions(prev => prev.map(session => {
-        if (session.id === currentSessionId) {
-          const msgs = [...session.messages];
-          // If initChat, we might need to add the welcome message first if it doesn't exist
-
-          let lastMsg = msgs[msgs.length - 1];
-
-          // Implementing "first chunk creates or appends"
-          if (initChat && (!lastMsg || lastMsg.role !== 'assistant')) {
-            // This is the first chunk of welcome message
-            const welcomeMsg = {
-              id: crypto.randomUUID(),
-              role: 'assistant',
-              content: event.data,
-              timestamp: new Date().toISOString()
-            };
-            return { ...session, messages: [...msgs, welcomeMsg] };
-          } else if (lastMsg && lastMsg.role === 'assistant') {
-            // Append to existing assistant message
-            const updatedMsg = { ...lastMsg, content: lastMsg.content + event.data };
-            msgs[msgs.length - 1] = updatedMsg;
-            return { ...session, messages: msgs };
-          }
-          return session;
-        }
-        return session;
-      }));
-    };
-
-    ws.onclose = (event) => {
-      setIsGenerating(false);
-      if (event.code !== 1000) {
-        // Handle error
-      }
-    };
-
-    ws.onerror = (error) => {
-      console.error("WebSocket Error:", error);
-      setIsGenerating(false);
-    };
-  };
-
-  const handleCancelGeneration = () => {
-    if (websocketRef.current) {
-      websocketRef.current.close(1000); // 1000 = Normal Closure
-      setIsGenerating(false);
-    }
-  };
-
-  const handleSendMessage = async (text) => {
-    if (!activeSessionId) return;
-
-    const timestamp = new Date().toISOString();
-    const userMsg = {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content: text,
-      timestamp
-    };
-
-    // Update active session with user message
-    setSessions(prev => prev.map(session => {
-      if (session.id === activeSessionId) {
-        // Generate title if needed
-        const newTitle = session.messages.length <= 1 ? text.slice(0, 30) + (text.length > 30 ? '...' : '') : session.title;
-        return {
-          ...session,
-          title: newTitle,
-          messages: [...session.messages, userMsg]
-        };
-      }
-      return session;
-    }));
-
-    connectWebSocket(text, false, activeSessionId);
-  };
-
-  const handleNewChat = (isInitial = false) => {
-    const newSessionId = crypto.randomUUID();
-    const newSession = {
-      id: newSessionId,
-      title: 'New Chat',
-      messages: []
-    };
-
-    setSessions(prev => [newSession, ...prev]);
-    setActiveSessionId(newSessionId);
-
-    if (window.innerWidth <= 768) setIsSidebarOpen(false);
-
-    setTimeout(() => connectWebSocket("", true, newSessionId), 0);
-  };
-
-  const handleSwitchSession = (sessionId) => {
-    if (isGenerating && websocketRef.current) {
-      websocketRef.current.close(1000);
-      setIsGenerating(false);
-    }
-    setActiveSessionId(sessionId);
-  };
-
-  const handleDeleteSession = (sessionId) => {
-    if (confirm("Delete this chat?")) {
-      setSessions(prev => {
-        const newSessions = prev.filter(s => s.id !== sessionId);
-        if (activeSessionId === sessionId) {
-          if (newSessions.length > 0) {
-            setActiveSessionId(newSessions[0].id);
-          } else {
-            const newId = crypto.randomUUID();
-            setTimeout(() => {
-              setSessions([{ id: newId, title: 'New Chat', messages: [] }]);
-              setActiveSessionId(newId);
-              connectWebSocket("", true, newId);
-            }, 0);
-            return [];
-          }
-        }
-        return newSessions;
-      });
-    }
-  };
-
-  const handleClearCurrentChat = () => {
-    if (activeSessionId) {
-      if (confirm("Clear all messages in this chat?")) {
-        setSessions(prev => prev.map(s => {
-          if (s.id === activeSessionId) {
-            return { ...s, messages: [] };
-          }
-          return s;
-        }));
-        // Optionally restart with welcome
-        setTimeout(() => connectWebSocket("", true, activeSessionId), 500);
-      }
-    }
-  };
-
-  const handleDeleteAllSessions = () => {
-    if (confirm("Are you sure you want to delete all chat history? This cannot be undone.")) {
-      // Close any active websocket
-      if (websocketRef.current) {
-        websocketRef.current.close(1000);
-        setIsGenerating(false);
-      }
-
-      // Create a fresh session
-      const newId = crypto.randomUUID();
-      setSessions([{ id: newId, title: 'New Chat', messages: [] }]);
-      setActiveSessionId(newId);
-
-      // Start with welcome message
-      setTimeout(() => connectWebSocket("", true, newId), 500);
-    }
-  };
-
+  const closeDrawer = () => setDrawerOpen(false);
   const toggleSidebar = () => {
-    setIsSidebarOpen(!isSidebarOpen);
+    if (isDesktop) setDesktopCollapsed((c) => !c);
+    else setDrawerOpen((o) => !o);
   };
+  const closeSidebar = () => {
+    if (isDesktop) setDesktopCollapsed(true);
+    else closeDrawer();
+    toggleRef.current?.focus();
+  };
+
+  // Escape closes the mobile drawer.
+  useEffect(() => {
+    if (!drawerActive) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        setDrawerOpen(false);
+        toggleRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [drawerActive]);
+
+  const handleNewChat = () => {
+    controller.newChat();
+    closeDrawer();
+    textareaRef.current?.focus();
+  };
+  const handleSelect = (id) => {
+    controller.switchSession(id);
+    closeDrawer();
+  };
+  const handlePickSuggestion = (prompt) => {
+    setDraft(prompt);
+    textareaRef.current?.focus();
+  };
+  const handleExport = () => {
+    if (activeSession) {
+      downloadText(exportFilename(activeSession), conversationToMarkdown(activeSession));
+    }
+  };
+
+  const confirmDialog = (() => {
+    if (!dialog) return {};
+    if (dialog.type === 'clear') {
+      return {
+        title: 'Clear this conversation?',
+        description:
+          'All messages in this chat will be removed from this browser, and Mitra AI will start again with a fresh greeting.',
+        confirmLabel: 'Clear conversation',
+        run: () => controller.clearSession(),
+      };
+    }
+    if (dialog.type === 'delete') {
+      const target = sessions.find((s) => s.id === dialog.id);
+      return {
+        title: 'Delete this chat?',
+        description: `“${target?.title ?? 'This chat'}” will be removed from this browser. This can’t be undone.`,
+        confirmLabel: 'Delete chat',
+        run: () => controller.deleteSession(dialog.id),
+      };
+    }
+    return {
+      title: 'Delete all chats?',
+      description:
+        'Every saved conversation will be removed from this browser. This can’t be undone. It does not affect anything the AI service may have already received.',
+      confirmLabel: 'Delete all',
+      run: () => controller.deleteAll(),
+    };
+  })();
+
+  const announcement = request ? ANNOUNCEMENTS[request.phase] : (ANNOUNCEMENTS[outcome] ?? '');
 
   return (
-    <div className="app-container">
-      <header className="app-header">
-        <button onClick={toggleSidebar} className="menu-btn" aria-label="Toggle sidebar">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <line x1="3" y1="12" x2="21" y2="12"></line>
-            <line x1="3" y1="6" x2="21" y2="6"></line>
-            <line x1="3" y1="18" x2="21" y2="18"></line>
-          </svg>
-        </button>
-        <div className="app-title">Mitra Ai</div>
-        <div className="header-actions">
-          <button onClick={() => handleNewChat(false)} className="new-chat-btn" aria-label="New chat">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="12" y1="5" x2="12" y2="19"></line>
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-            </svg>
-          </button>
-        </div>
-      </header>
-
+    <div className="app" data-sidebar={sidebarOpen ? 'open' : 'closed'}>
       <Sidebar
         sessions={sessions}
         activeSessionId={activeSessionId}
-        onSwitchSession={handleSwitchSession}
-        onNewChat={() => handleNewChat(false)}
-        onDeleteSession={handleDeleteSession}
-        onDeleteAll={handleDeleteAllSessions}
-        isOpen={isSidebarOpen}
-        toggleSidebar={toggleSidebar}
+        isOpen={sidebarOpen}
+        onClose={closeSidebar}
+        onSelect={handleSelect}
+        onNewChat={handleNewChat}
+        onRename={controller.renameSession}
+        onDelete={(id) => setDialog({ type: 'delete', id })}
+        onDeleteAll={() => setDialog({ type: 'deleteAll' })}
+        storageWarning={storageWarning}
+        onDismissWarning={controller.dismissStorageWarning}
+      />
+      {drawerActive && <div className="scrim" onClick={closeDrawer} aria-hidden="true" />}
+
+      <div className="workspace" inert={drawerActive}>
+        <header className="app-header">
+          <button
+            ref={toggleRef}
+            type="button"
+            className="icon-btn"
+            onClick={toggleSidebar}
+            aria-label={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+            aria-expanded={sidebarOpen}
+            aria-controls="chat-sidebar"
+            title={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+          >
+            <Icon name="sidebar" />
+          </button>
+          <div className="brand">
+            <BrandMark />
+            <span>Mitra AI</span>
+          </div>
+          <span className="header-title" title={activeSession?.title}>
+            {messages.length > 0 ? activeSession?.title : ''}
+          </span>
+          <div className="header-actions">
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={handleExport}
+              disabled={messages.length === 0}
+              aria-label="Export conversation as Markdown"
+              title="Export conversation"
+            >
+              <Icon name="download" />
+            </button>
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={() => setDialog({ type: 'clear' })}
+              disabled={!activeSession || messages.length === 0}
+              aria-label="Clear conversation"
+              title="Clear conversation"
+            >
+              <Icon name="eraser" />
+            </button>
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={toggleTheme}
+              aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+              title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+            >
+              <Icon name={theme === 'dark' ? 'sun' : 'moon'} />
+            </button>
+            {!sidebarOpen && (
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={handleNewChat}
+                aria-label="New chat"
+                title="New chat"
+              >
+                <Icon name="plus" />
+              </button>
+            )}
+          </div>
+        </header>
+
+        <main className="chat-main">
+          <ChatContainer
+            key={activeSessionId ?? 'none'}
+            messages={messages}
+            request={request?.sessionId === activeSessionId ? request : null}
+            welcomeError={activeSessionId ? welcomeErrors[activeSessionId] : undefined}
+            onRetryMessage={controller.retryMessage}
+            onRetryWelcome={controller.retryWelcome}
+            onPickSuggestion={handlePickSuggestion}
+          />
+          <InputArea
+            value={draft}
+            onChange={setDraft}
+            onSend={controller.sendMessage}
+            onStop={controller.stopGeneration}
+            isGenerating={isGenerating}
+            phase={request?.phase}
+            textareaRef={textareaRef}
+          />
+        </main>
+      </div>
+
+      <ConfirmDialog
+        open={dialog !== null}
+        title={confirmDialog.title}
+        description={confirmDialog.description}
+        confirmLabel={confirmDialog.confirmLabel}
+        onCancel={() => setDialog(null)}
+        onConfirm={() => {
+          confirmDialog.run?.();
+          setDialog(null);
+        }}
       />
 
-      <main className={`main-content ${isSidebarOpen ? 'shifted' : ''}`}>
-        <ChatContainer messages={activeSession.messages} isTyping={isGenerating} />
-        <InputArea
-          onSendMessage={handleSendMessage}
-          isGenerating={isGenerating}
-          onCancel={handleCancelGeneration}
-          onClear={handleClearCurrentChat}
-        />
-      </main>
+      <div className="sr-only" role="status" aria-live="polite">
+        {announcement}
+      </div>
     </div>
   );
 };
