@@ -1,11 +1,21 @@
 import { createClient } from '@supabase/supabase-js';
 
+function formatSupabaseUrl(url) {
+  if (!url) return '';
+  const trimmed = String(url).trim();
+  const dashboardMatch = trimmed.match(/supabase\.com\/dashboard\/project\/([a-z0-9_-]+)/i);
+  if (dashboardMatch) {
+    return `https://${dashboardMatch[1]}.supabase.co`;
+  }
+  return trimmed.replace(/\/+$/, '');
+}
+
 // Public, browser-safe settings. The publishable key is NOT a secret and is only
 // safe because row-level security protects every table. Never put a service-role
 // key (or any private key) in a VITE_* variable.
 const env = import.meta.env ?? {};
-export const supabaseUrl = env.VITE_SUPABASE_URL || '';
-const publishableKey = env.VITE_SUPABASE_PUBLISHABLE_KEY || '';
+export const supabaseUrl = formatSupabaseUrl(env.VITE_SUPABASE_URL || '');
+const publishableKey = String(env.VITE_SUPABASE_PUBLISHABLE_KEY || '').trim();
 
 export const isBackendConfigured = Boolean(supabaseUrl && publishableKey);
 export const supabasePublishableKey = publishableKey;
