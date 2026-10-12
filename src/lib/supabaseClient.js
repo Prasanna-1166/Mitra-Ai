@@ -1,5 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 
+const DEFAULT_SUPABASE_URL = 'https://rpxzitasxocfffxrpojx.supabase.co';
+const DEFAULT_PUBLISHABLE_KEY = 'sb_publishable_xNwdNLeMnnjQNkInIgk0CQ_jTAcoQX8';
+
 function formatSupabaseUrl(url) {
   if (!url) return '';
   const trimmed = String(url).trim();
@@ -14,8 +17,8 @@ function formatSupabaseUrl(url) {
 // safe because row-level security protects every table. Never put a service-role
 // key (or any private key) in a VITE_* variable.
 const env = import.meta.env ?? {};
-export const supabaseUrl = formatSupabaseUrl(env.VITE_SUPABASE_URL || '');
-const publishableKey = String(env.VITE_SUPABASE_PUBLISHABLE_KEY || '').trim();
+export const supabaseUrl = formatSupabaseUrl(env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL);
+const publishableKey = String(env.VITE_SUPABASE_PUBLISHABLE_KEY || DEFAULT_PUBLISHABLE_KEY).trim();
 
 export const isBackendConfigured = Boolean(supabaseUrl && publishableKey);
 export const supabasePublishableKey = publishableKey;
