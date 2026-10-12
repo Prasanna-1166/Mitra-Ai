@@ -27,3 +27,8 @@ dist-ssr
 .env
 .env.*
 !.env.example
+
+# Supabase local state and server-side secrets
+supabase/.env
+supabase/.branches
+supabase/.temp

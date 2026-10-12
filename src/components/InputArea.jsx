@@ -11,10 +11,10 @@ const STATUS_TEXT = {
   streaming: 'Mitra AI is responding…',
 };
 
-const InputArea = ({ value, onChange, onSend, onStop, isGenerating, phase, textareaRef }) => {
+const InputArea = ({ value, onChange, onSend, onStop, isGenerating, phase, textareaRef, maxLength, disabledReason }) => {
   const localRef = useRef(null);
   const ref = textareaRef ?? localRef;
-  const canSend = value.trim().length > 0 && !isGenerating;
+  const canSend = value.trim().length > 0 && !isGenerating && !disabledReason;
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -25,7 +25,7 @@ const InputArea = ({ value, onChange, onSend, onStop, isGenerating, phase, texta
 
   const submit = () => {
     const text = value.trim();
-    if (isGenerating || !text) return;
+    if (isGenerating || !text || disabledReason) return;
     if (onSend(text) !== false) onChange('');
   };
 
@@ -43,6 +43,7 @@ const InputArea = ({ value, onChange, onSend, onStop, isGenerating, phase, texta
             ref={ref}
             className="composer-input"
             rows={1}
+            maxLength={maxLength}
             value={value}
             placeholder="Message Mitra AI"
             aria-label="Message Mitra AI"
@@ -80,7 +81,9 @@ const InputArea = ({ value, onChange, onSend, onStop, isGenerating, phase, texta
         <p id="composer-hint" className={`composer-hint ${isGenerating ? '' : 'is-keys'}`}>
           {isGenerating
             ? (STATUS_TEXT[phase] ?? 'Mitra AI is responding…')
-            : 'Enter to send · Shift+Enter for a new line'}
+            : (disabledReason ?? (maxLength && value.length > maxLength * 0.9
+              ? `${value.length} / ${maxLength} characters`
+              : 'Enter to send · Shift+Enter for a new line'))}
         </p>
       </form>
     </footer>
@@ -95,6 +98,8 @@ InputArea.propTypes = {
   isGenerating: PropTypes.bool,
   phase: PropTypes.string,
   textareaRef: PropTypes.shape({ current: PropTypes.any }),
+  maxLength: PropTypes.number,
+  disabledReason: PropTypes.string,
 };
 
 export default InputArea;

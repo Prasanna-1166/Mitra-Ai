@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 import Icon from './Icon';
-import MessageBubble, { PendingIndicator } from './MessageBubble';
+import MessageBubble from './MessageBubble';
 import { isNearBottom } from '../lib/scroll';
 
 const SUGGESTIONS = [
@@ -14,6 +14,8 @@ const SUGGESTIONS = [
 const prefersReducedMotion = () =>
   typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
+// Suggestions fill the composer; the user edits and sends them through the
+// normal send path (no separate request code).
 export const Suggestions = ({ onPick }) => (
   <ul className="suggestions" aria-label="Prompt suggestions">
     {SUGGESTIONS.map((s) => (
@@ -28,16 +30,9 @@ export const Suggestions = ({ onPick }) => (
 Suggestions.propTypes = { onPick: PropTypes.func.isRequired };
 
 // Mount with key={sessionId} so each conversation starts pinned to its end.
-const ChatContainer = ({
-  messages,
-  request,
-  welcomeError,
-  onRetryMessage,
-  onRetryWelcome,
-  onPickSuggestion,
-}) => {
+const ChatContainer = ({ messages, request, loading, hasMore, onLoadOlder, onRetryMessage, onPickSuggestion }) => {
   const scrollerRef = useRef(null);
-  const stickRef = useRef(true); // follow new content only while the reader is at the bottom
+  const stickRef = useRef(true);
   const [atBottom, setAtBottom] = useState(true);
 
   const scrollToBottom = useCallback((smooth = false) => {
@@ -52,42 +47,32 @@ const ChatContainer = ({
     setAtBottom(near);
   };
 
-  // Runs for every streamed update: an instant jump (never per-token smooth
-  // scrolling), and only when the user has not scrolled away.
+  // Follow streamed text only while the reader is at the bottom; instant jumps,
+  // never per-token smooth scrolling.
   useLayoutEffect(() => {
-    if (messages[messages.length - 1]?.role === 'user') stickRef.current = true; // they just sent
+    if (messages[messages.length - 1]?.role === 'user') stickRef.current = true;
     if (stickRef.current) scrollToBottom();
   }, [messages, request, scrollToBottom]);
 
-  const hasUser = messages.some((m) => m.role === 'user');
   const lastIndex = messages.length - 1;
-  const welcomePending =
-    request?.kind === 'welcome' && !messages.some((m) => m.id === request.messageId);
   const busy = Boolean(request);
 
   return (
     <div className="chat-scroll-wrap">
       <div className="chat-scroll" ref={scrollerRef} onScroll={handleScroll}>
         <div className="chat-column">
-          {messages.length === 0 && (
+          {loading && <p className="sidebar-empty" role="status">Loading conversation…</p>}
+          {!loading && messages.length === 0 && (
             <div className="empty-state">
               <h1>How can I help you today?</h1>
               <p>Ask a question, or start from one of these.</p>
-              {welcomePending && <PendingIndicator phase={request.phase} />}
-              {welcomeError && (
-                <div className="notice is-error" role="alert">
-                  <Icon name="alert" size={16} />
-                  <div className="notice-text">
-                    <strong>Couldn&apos;t load the greeting</strong>
-                    <span>{welcomeError} You can still send a message.</span>
-                  </div>
-                  <button type="button" className="btn btn-sm" onClick={onRetryWelcome}>
-                    <Icon name="retry" size={14} />
-                    Retry
-                  </button>
-                </div>
-              )}
               <Suggestions onPick={onPickSuggestion} />
+            </div>
+          )}
+
+          {hasMore && (
+            <div className="load-older">
+              <button type="button" className="btn btn-sm" onClick={onLoadOlder}>Load earlier messages</button>
             </div>
           )}
 
@@ -102,13 +87,6 @@ const ChatContainer = ({
               />
             ))}
           </div>
-
-          {messages.length > 0 && !hasUser && !busy && (
-            <div className="suggestions-block">
-              <p>Try asking</p>
-              <Suggestions onPick={onPickSuggestion} />
-            </div>
-          )}
         </div>
       </div>
 
@@ -131,14 +109,11 @@ const ChatContainer = ({
 
 ChatContainer.propTypes = {
   messages: PropTypes.arrayOf(PropTypes.object).isRequired,
-  request: PropTypes.shape({
-    kind: PropTypes.string,
-    messageId: PropTypes.string,
-    phase: PropTypes.string,
-  }),
-  welcomeError: PropTypes.string,
+  request: PropTypes.shape({ messageId: PropTypes.string, phase: PropTypes.string }),
+  loading: PropTypes.bool,
+  hasMore: PropTypes.bool,
+  onLoadOlder: PropTypes.func,
   onRetryMessage: PropTypes.func.isRequired,
-  onRetryWelcome: PropTypes.func.isRequired,
   onPickSuggestion: PropTypes.func.isRequired,
 };
 

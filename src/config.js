@@ -1,5 +1,6 @@
-// Deployment settings. Everything here is PUBLIC: Vite inlines VITE_* variables
-// into the browser bundle, so never put secrets or private keys in them.
+// Public, browser-side settings. Everything here is visible to users: never put
+// secrets in VITE_* variables. Limits, prompts and provider settings live on the
+// server (see supabase/functions/_shared/config.js).
 const env = import.meta.env ?? {};
 
 const positiveNumber = (value, fallback) => {
@@ -8,16 +9,10 @@ const positiveNumber = (value, fallback) => {
 };
 
 export const config = {
-  // Existing provider endpoint and application identifier (defaults preserved).
-  wsUrl: env.VITE_AI_WS_URL || 'wss://backend.buildpicoapps.com/api/chatbot/chat',
-  appId: env.VITE_AI_APP_ID || 'college-wife',
-  systemPrompt:
-    env.VITE_AI_SYSTEM_PROMPT ||
-    'You are Mitra AI, a friendly, intelligent, and helpful AI assistant designed to race through problems and find solutions fast.',
-  welcomePrompt: 'A welcoming introduction from Mitra AI',
-  // Give up if the socket has not opened within this time.
-  connectTimeoutMs: positiveNumber(env.VITE_AI_CONNECT_TIMEOUT_MS, 10000),
-  // Give up if the provider is silent for this long after the request is sent
-  // (reset on every received chunk).
-  idleTimeoutMs: positiveNumber(env.VITE_AI_IDLE_TIMEOUT_MS, 45000),
+  // How long to wait for the ticket request / socket to open, and for the next frame.
+  connectTimeoutMs: positiveNumber(env.VITE_CONNECT_TIMEOUT_MS, 12000),
+  idleTimeoutMs: positiveNumber(env.VITE_IDLE_TIMEOUT_MS, 60000),
+  // UX limits; the server enforces its own (MAX_MESSAGE_CHARS, CONTEXT_MAX_MESSAGES).
+  maxMessageChars: positiveNumber(env.VITE_MAX_MESSAGE_CHARS, 8000),
+  contextMessages: positiveNumber(env.VITE_GUEST_CONTEXT_MESSAGES, 20),
 };

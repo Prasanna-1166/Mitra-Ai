@@ -4,13 +4,21 @@ import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { loadModule } from './helpers.js';
 
-let MessageBubble, InputArea, Sidebar, ChatContainer, ConfirmDialog;
+let MessageBubble, InputArea, Sidebar, ChatContainer, ConfirmDialog, AuthMod, LimitDialog, ImportDialog, SettingsDialog, MemoryPanel, UsageBadge, MemoryBanner, AccountMenu;
 before(async () => {
   MessageBubble = (await loadModule('src/components/MessageBubble.jsx')).default;
   InputArea = (await loadModule('src/components/InputArea.jsx')).default;
   Sidebar = (await loadModule('src/components/Sidebar.jsx')).default;
   ChatContainer = (await loadModule('src/components/ChatContainer.jsx')).default;
   ConfirmDialog = (await loadModule('src/components/ConfirmDialog.jsx')).default;
+  AuthMod = await loadModule('src/components/AuthDialog.jsx');
+  LimitDialog = (await loadModule('src/components/LimitDialog.jsx')).default;
+  ImportDialog = (await loadModule('src/components/ImportDialog.jsx')).default;
+  SettingsDialog = (await loadModule('src/components/SettingsDialog.jsx')).default;
+  MemoryPanel = (await loadModule('src/components/MemoryPanel.jsx')).default;
+  UsageBadge = (await loadModule('src/components/UsageBadge.jsx')).default;
+  MemoryBanner = (await loadModule('src/components/MemoryBanner.jsx')).default;
+  AccountMenu = (await loadModule('src/components/AccountMenu.jsx')).default;
 });
 
 const assistant = (content, extra = {}) =>
@@ -141,7 +149,8 @@ test('sidebar: chats are real buttons, active chat is marked, icon buttons have 
   assert.match(html, /aria-label="Delete chat: DNS notes"/);
   assert.match(html, /aria-label="Search chats"/);
   assert.match(html, /aria-label="Close sidebar"/);
-  assert.match(html, /Chats are saved in this browser only/);
+  assert.match(html, /Chats are saved to your account\. Your messages are sent to an external AI service/);
+  assert.match(renderToStaticMarkup(h(Sidebar, { ...sidebarProps, isGuest: true })), /Guest chats are saved in this browser only\. Your messages are sent to an external AI service/);
   assert.ok(!/<div[^>]*class="session-item/.test(html));
 });
 
@@ -153,25 +162,21 @@ test('sidebar: closed state is inert, empty history has a message, warnings are 
   assert.match(warn, /role="alert"[^>]*>[^]*Storage is full\./);
 });
 
-test('conversation view: empty state offers real suggestion buttons; greeting-only chats do too', () => {
-  const props = { messages: [], request: null, onRetryMessage() {}, onRetryWelcome() {}, onPickSuggestion() {} };
+test('conversation view: static welcome with real suggestion buttons, no AI call involved', () => {
+  const props = { messages: [], request: null, onRetryMessage() {}, onPickSuggestion() {} };
   const empty = renderToStaticMarkup(h(ChatContainer, props));
   assert.match(empty, /How can I help you today\?/);
   assert.equal(empty.match(/class="suggestion"/g).length, 4);
 
-  const failed = renderToStaticMarkup(h(ChatContainer, { ...props, welcomeError: 'Could not connect.' }));
-  assert.match(failed, /role="alert"/);
-  assert.match(failed, />Retry</);
-
-  const greeted = renderToStaticMarkup(
-    h(ChatContainer, { ...props, messages: [{ id: 'g', role: 'assistant', content: 'Hi!', status: 'complete' }] }),
-  );
-  assert.match(greeted, /Try asking/);
-  const talked = renderToStaticMarkup(
-    h(ChatContainer, { ...props, messages: [{ id: 'u', role: 'user', content: 'hello' }] }),
-  );
-  assert.ok(!/Try asking/.test(talked));
+  const talked = renderToStaticMarkup(h(ChatContainer, { ...props, messages: [{ id: 'u', role: 'user', content: 'hello' }] }));
+  assert.ok(!/How can I help/.test(talked));
   assert.match(talked, /role="log"/);
+
+  const older = renderToStaticMarkup(h(ChatContainer, { ...props, messages: [{ id: 'u', role: 'user', content: 'hello' }], hasMore: true, onLoadOlder() {} }));
+  assert.match(older, />Load earlier messages</);
+  const loading = renderToStaticMarkup(h(ChatContainer, { ...props, loading: true }));
+  assert.match(loading, /Loading conversation/);
+  assert.ok(!/How can I help/.test(loading));
 });
 
 test('confirm dialog uses a labelled alert dialog and only renders content when open', () => {
@@ -182,4 +187,142 @@ test('confirm dialog uses a labelled alert dialog and only renders content when 
   assert.match(open, /role="alertdialog"/);
   assert.match(open, /aria-labelledby/);
   assert.match(open, /autofocus/i);
+});
+
+const noop = () => {};
+
+test('auth dialog: labelled email/password fields, show-password toggle, recovery and mode switch links', () => {
+  const html = renderToStaticMarkup(h(AuthMod.default, { open: true, initialMode: 'signin', onClose: noop, onSignIn: noop, onSignUp: noop, onForgot: noop }));
+  assert.match(html, /<h2[^>]*>Sign in<\/h2>/);
+  assert.match(html, /<label[^>]*>Email<\/label>/);
+  assert.match(html, /<label[^>]*>Password<\/label>/);
+  assert.match(html, /autoComplete="current-password"|autocomplete="current-password"/i);
+  assert.match(html, /aria-label="Show password"[^>]*aria-pressed="false"|aria-pressed="false"[^>]*aria-label="Show password"/);
+  assert.match(html, />Forgot password\?</);
+  assert.match(html, />Create an account</);
+  assert.match(html, /aria-label="Close"/);
+  const signup = renderToStaticMarkup(h(AuthMod.default, { open: true, initialMode: 'signup', onClose: noop, onSignIn: noop, onSignUp: noop, onForgot: noop }));
+  assert.match(signup, /Create your account/);
+  assert.match(signup, /new-password/i);
+  assert.match(signup, /At least 8 characters/);
+  assert.equal(renderToStaticMarkup(h(AuthMod.default, { open: false, onClose: noop, onSignIn: noop, onSignUp: noop, onForgot: noop })).includes('Email'), false);
+});
+
+test('password reset dialog asks for and confirms a new password', () => {
+  const html = renderToStaticMarkup(h(AuthMod.ResetPasswordDialog, { open: true, onSubmit: noop, onClose: noop }));
+  assert.match(html, /Choose a new password/);
+  assert.match(html, /Confirm new password/);
+});
+
+test('guest limit dialog: explains the allowance, offers sign-in/registration and a way back; nothing is cleared', () => {
+  const limit = { kind: 'guest', usage: { used: 5, limit: 5, remaining: 0 }, restoredText: 'q' };
+  const html = renderToStaticMarkup(h(LimitDialog, { limit, limits: { guest: 5, user: 100 }, onSignIn: noop, onRegister: noop, onClose: noop }));
+  assert.match(html, /used your free questions/);
+  assert.match(html, /5 questions without an account/);
+  assert.match(html, /100 questions per day/);
+  assert.match(html, />Create account</);
+  assert.match(html, />Sign in</);
+  assert.match(html, />Back to my conversation</);
+  assert.match(html, /Nothing is deleted/);
+  assert.match(html, /role="alertdialog"/);
+  const user = renderToStaticMarkup(h(LimitDialog, { limit: { kind: 'user', usage: { limit: 100, resetsAt: '2026-10-12T00:00:00.000Z' } }, limits: null, onSignIn: noop, onRegister: noop, onClose: noop }));
+  assert.match(user, /reached today/);
+  assert.ok(!/Create account/.test(user));
+  assert.equal(renderToStaticMarkup(h(LimitDialog, { limit: null, onSignIn: noop, onRegister: noop, onClose: noop })).includes('free questions'), false);
+});
+
+test('import dialog uses the required wording, offers import or skip, and shows progress and errors', () => {
+  const base = { open: true, count: 2, progress: { done: 1, total: 2 }, busy: false, onImport: noop, onSkip: noop };
+  const html = renderToStaticMarkup(h(ImportDialog, base));
+  assert.match(html, /Save your guest conversations to your account\?/);
+  assert.match(html, />Skip</);
+  assert.match(html, />Import</);
+  assert.match(html, /2 conversations/);
+  const busy = renderToStaticMarkup(h(ImportDialog, { ...base, busy: true }));
+  assert.match(busy, /<progress/);
+  assert.match(busy, /Importing 1 of 2/);
+  const failed = renderToStaticMarkup(h(ImportDialog, { ...base, error: 'The import did not finish.' }));
+  assert.match(failed, /role="alert"/);
+  assert.match(failed, />Try again</);
+  assert.match(renderToStaticMarkup(h(ImportDialog, { ...base, depth: 'detailed', carryDepth: true, onCarryDepth: noop })), /detailed response style/);
+});
+
+test('usage badge: guests always see the remaining allowance; users only when it runs low', () => {
+  assert.match(renderToStaticMarkup(h(UsageBadge, { kind: 'guest', usage: { remaining: 3, limit: 5 } })), /3 of 5 free questions left/);
+  assert.match(renderToStaticMarkup(h(UsageBadge, { kind: 'guest', usage: { remaining: 0, limit: 5 } })), /is-empty/);
+  assert.equal(renderToStaticMarkup(h(UsageBadge, { kind: 'user', usage: { remaining: 80, limit: 100 } })), '');
+  assert.match(renderToStaticMarkup(h(UsageBadge, { kind: 'user', usage: { remaining: 4, limit: 100 } })), /4 left today/);
+  assert.equal(renderToStaticMarkup(h(UsageBadge, { kind: 'guest', usage: null })), '');
+});
+
+test('account menu: guests get Sign in, users get an accessibly named menu button', () => {
+  assert.match(renderToStaticMarkup(h(AccountMenu, { user: null, onSignIn: noop, onSettings: noop, onSignOut: noop })), />Sign in</);
+  const html = renderToStaticMarkup(h(AccountMenu, { user: { email: 'ada@example.com' }, onSignIn: noop, onSettings: noop, onSignOut: noop }));
+  assert.match(html, /aria-label="Account menu for ada@example\.com"/);
+  assert.match(html, /aria-haspopup="menu"/);
+  assert.match(html, />A</);
+});
+
+const account = {
+  depth: 'balanced', setDepth: noop, error: null, settings: { memory_enabled: true, auto_memory: true },
+  memories: [{ id: 'm1', content: 'I prefer TypeScript', enabled: true }, { id: 'm2', content: 'Old note', enabled: false }],
+  setMemoryEnabled: noop, setAutoMemory: noop, addMemory: noop, updateMemory: noop, removeMemory: noop, clearMemories: noop,
+};
+
+test('memory panel: list, per-item controls with names, switches, add field and clear-all', () => {
+  const html = renderToStaticMarkup(h(MemoryPanel, {
+    settings: account.settings, memories: account.memories, error: null, onMemoryEnabled: noop, onAutoMemory: noop,
+    onAdd: noop, onUpdate: noop, onRemove: noop, onClearAll: noop,
+  }));
+  assert.match(html, /I prefer TypeScript/);
+  assert.match(html, /aria-label="Edit memory: I prefer TypeScript"/);
+  assert.match(html, /aria-label="Delete memory: I prefer TypeScript"/);
+  assert.match(html, /aria-label="Use this memory: Old note"/);
+  assert.match(html, /memory-item is-off/);
+  assert.match(html, /role="switch"/);
+  assert.match(html, />Use memory</);
+  assert.match(html, />Suggest memories</);
+  assert.match(html, /Nothing is saved without your confirmation/);
+  assert.match(html, />Clear all memories</);
+  assert.match(html, /Never save passwords or keys/);
+  const empty = renderToStaticMarkup(h(MemoryPanel, { ...{ settings: account.settings, memories: [], error: 'x', onMemoryEnabled: noop, onAutoMemory: noop, onAdd: noop, onUpdate: noop, onRemove: noop, onClearAll: noop } }));
+  assert.match(empty, /No saved memories yet/);
+  assert.ok(!/Clear all memories/.test(empty));
+});
+
+test('settings dialog: guests and users see the right sections; depth choices and honest model note are present', () => {
+  const base = { open: true, onClose: noop, usage: { used: 2, limit: 100, remaining: 98, resetsAt: '2026-10-12T00:00:00.000Z' }, limits: { guest: 5, user: 100 }, account, theme: 'light', onToggleTheme: noop, onSignIn: noop, onSignOut: noop, onDeleteChats: noop, onDeleteAccount: noop };
+  const signed = renderToStaticMarkup(h(SettingsDialog, { ...base, user: { email: 'ada@example.com' } }));
+  assert.match(signed, /ada@example\.com/);
+  assert.match(signed, /2 of 100 used/);
+  assert.match(signed, />Concise</);
+  assert.match(signed, />Balanced</);
+  assert.match(signed, />Detailed</);
+  assert.match(signed, /checked=""[^>]*value="balanced"|value="balanced"[^>]*checked=""/);
+  assert.match(signed, /underlying AI model comes from an external provider and is not changed/);
+  assert.match(signed, />Use memory</);
+  assert.match(signed, /Delete account…/);
+  assert.match(signed, />Sign out</);
+  assert.match(signed, /sent to an external AI service/);
+
+  const guest = renderToStaticMarkup(h(SettingsDialog, { ...base, user: null, usage: { used: 2, limit: 5, remaining: 3 } }));
+  assert.match(guest, /3 of 5 free questions left/);
+  assert.match(guest, /raises the limit to 100 questions per day/);
+  assert.match(guest, /Memory is available with an account/);
+  assert.ok(!/Delete account…/.test(guest));
+  assert.match(guest, /stored only in this browser/);
+});
+
+test('memory banner: suggestions need an explicit Save; saved notes can be undone; errors are alerts', () => {
+  const props = { onAccept: noop, onDismiss: noop, onDismissNotice: noop, onUndo: noop, onManage: noop };
+  const sug = renderToStaticMarkup(h(MemoryBanner, { ...props, suggestion: { text: 'I prefer Python' }, notice: null }));
+  assert.match(sug, /Save to memory/);
+  assert.match(sug, />Save</);
+  assert.match(sug, />Not now</);
+  const saved = renderToStaticMarkup(h(MemoryBanner, { ...props, suggestion: null, notice: { kind: 'saved', text: 'I use Vite', id: 'x' } }));
+  assert.match(saved, /Saved to memory/);
+  assert.match(saved, />Undo</);
+  const err = renderToStaticMarkup(h(MemoryBanner, { ...props, suggestion: null, notice: { kind: 'error', text: 'Not saved.' } }));
+  assert.match(err, /role="alert"/);
+  assert.equal(renderToStaticMarkup(h(MemoryBanner, { ...props, suggestion: null, notice: null })), '');
 });

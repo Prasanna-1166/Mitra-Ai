@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import PropTypes from 'prop-types';
 import Icon from './Icon';
 import { formatRelativeTime, matchesSearch } from '../lib/chatState';
@@ -15,13 +15,39 @@ const Sidebar = ({
   onDeleteAll,
   storageWarning,
   onDismissWarning,
+  isGuest,
+  loading,
+  hasMore,
+  onLoadMore,
+  onRemoteSearch,
 }) => {
   const [query, setQuery] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [draftTitle, setDraftTitle] = useState('');
 
-  const visible = sessions.filter((s) => matchesSearch(s, query));
+  const [remoteIds, setRemoteIds] = useState({ query: '', ids: null });
   const searching = query.trim().length > 0;
+
+  // Signed-in users also search message text on the server (debounced).
+  useEffect(() => {
+    const q = query.trim();
+    if (!q || !onRemoteSearch) return undefined;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      onRemoteSearch(q)
+        .then((ids) => {
+          if (!cancelled) setRemoteIds({ query: q, ids });
+        })
+        .catch(() => {});
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query, onRemoteSearch]);
+
+  const remote = remoteIds.query === query.trim() ? remoteIds.ids : null;
+  const visible = sessions.filter((s) => matchesSearch(s, query) || (remote && remote.has(s.id)));
 
   const startRename = (session) => {
     setEditingId(session.id);
@@ -70,7 +96,9 @@ const Sidebar = ({
       </div>
 
       <nav className="session-nav" aria-label="Saved chats">
-        {sessions.length === 0 ? (
+        {loading ? (
+          <p className="sidebar-empty" role="status">Loading your chats…</p>
+        ) : sessions.length === 0 ? (
           <p className="sidebar-empty">No saved chats yet.</p>
         ) : visible.length === 0 ? (
           <p className="sidebar-empty" role="status">
@@ -117,7 +145,7 @@ const Sidebar = ({
                         <span className="session-title">{session.title}</span>
                         <span className="session-meta">
                           {formatRelativeTime(session.updatedAt)}
-                          {searching ? ` · ${session.messages.length} messages` : ''}
+
                         </span>
                       </button>
                       <div className="session-actions">
@@ -147,6 +175,9 @@ const Sidebar = ({
             })}
           </ul>
         )}
+        {hasMore && !searching && (
+          <button type="button" className="btn btn-sm btn-quiet load-more" onClick={onLoadMore}>Load more chats</button>
+        )}
       </nav>
 
       <div className="sidebar-footer">
@@ -163,8 +194,10 @@ const Sidebar = ({
           Delete all chats
         </button>
         <p className="privacy-note">
-          Chats are saved in this browser only. Your messages are sent to an external AI service to
-          generate replies.
+          {isGuest
+            ? 'Guest chats are saved in this browser only. '
+            : 'Chats are saved to your account. '}
+          Your messages are sent to an external AI service to generate replies.
         </p>
       </div>
     </aside>
@@ -183,6 +216,11 @@ Sidebar.propTypes = {
   onDeleteAll: PropTypes.func.isRequired,
   storageWarning: PropTypes.string,
   onDismissWarning: PropTypes.func.isRequired,
+  isGuest: PropTypes.bool,
+  loading: PropTypes.bool,
+  hasMore: PropTypes.bool,
+  onLoadMore: PropTypes.func,
+  onRemoteSearch: PropTypes.func,
 };
 
 export default Sidebar;

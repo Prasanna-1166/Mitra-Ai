@@ -1,0 +1,41 @@
+# Supabase local development / deployment settings for Mitra AI.
+project_id = "mitra-ai"
+
+[api]
+enabled = true
+schemas = ["public"]
+max_rows = 1000
+
+[db]
+major_version = 17
+
+[auth]
+enabled = true
+# Local dev default; set the real origin(s) in the Supabase dashboard
+# (Authentication -> URL Configuration) for deployed environments.
+site_url = "http://localhost:5173"
+additional_redirect_urls = ["http://localhost:5173", "http://localhost:4173"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+enable_signup = true
+enable_anonymous_sign_ins = false
+minimum_password_length = 8
+password_requirements = "letters_digits"
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+# Set to true to require email verification before the first sign-in.
+enable_confirmations = true
+
+# These functions authenticate callers themselves (a short-lived ticket, or a
+# user JWT checked in code). A browser WebSocket cannot send an Authorization
+# header and guests have no JWT, so gateway-level JWT verification is off.
+[functions.chat-ticket]
+verify_jwt = false
+
+[functions.chat-relay]
+verify_jwt = false
+
+[functions.delete-account]
+verify_jwt = false
