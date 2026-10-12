@@ -55,7 +55,7 @@ const DeleteAccount = ({ onDelete }) => {
 };
 DeleteAccount.propTypes = { onDelete: PropTypes.func.isRequired };
 
-const SettingsDialog = ({ open, onClose, user, usage, limits, account, theme, onToggleTheme, onSignIn, onSignOut, onDeleteChats, onDeleteAccount }) => {
+const SettingsDialog = ({ open, onClose, user, profile, onOpenProfile, usage, limits, account, theme, onToggleTheme, onSignIn, onSignOut, onDeleteChats, onDeleteAccount }) => {
   const titleId = useId();
   return (
     <Modal open={open} onClose={onClose} labelledBy={titleId} size="lg">
@@ -70,6 +70,9 @@ const SettingsDialog = ({ open, onClose, user, usage, limits, account, theme, on
             <h3 id={`${titleId}-account`}>Account</h3>
             {user ? (
               <>
+                {profile?.display_name && (
+                  <p className="settings-row"><span>Display name</span><strong>{profile.display_name}</strong></p>
+                )}
                 <p className="settings-row"><span>Signed in as</span><strong>{user.email}</strong></p>
                 {usage && (
                   <p className="settings-row">
@@ -77,7 +80,14 @@ const SettingsDialog = ({ open, onClose, user, usage, limits, account, theme, on
                     <strong>{usage.used} of {usage.limit} used{formatReset(usage.resetsAt) ? ` · resets ${formatReset(usage.resetsAt)}` : ''}</strong>
                   </p>
                 )}
-                <button type="button" className="btn btn-sm" onClick={onSignOut}><Icon name="logout" size={14} />Sign out</button>
+                <div className="row-actions">
+                  {onOpenProfile && (
+                    <button type="button" className="btn btn-sm" onClick={() => { onClose(); onOpenProfile(); }}>
+                      <Icon name="user" size={14} />Edit profile…
+                    </button>
+                  )}
+                  <button type="button" className="btn btn-sm" onClick={onSignOut}><Icon name="logout" size={14} />Sign out</button>
+                </div>
               </>
             ) : (
               <>
@@ -152,7 +162,10 @@ const SettingsDialog = ({ open, onClose, user, usage, limits, account, theme, on
 
 SettingsDialog.propTypes = {
   open: PropTypes.bool.isRequired, onClose: PropTypes.func.isRequired,
-  user: PropTypes.shape({ email: PropTypes.string }), usage: PropTypes.object, limits: PropTypes.object,
+  user: PropTypes.shape({ email: PropTypes.string }),
+  profile: PropTypes.shape({ display_name: PropTypes.string, avatar_url: PropTypes.string }),
+  onOpenProfile: PropTypes.func,
+  usage: PropTypes.object, limits: PropTypes.object,
   account: PropTypes.object.isRequired,
   theme: PropTypes.string, onToggleTheme: PropTypes.func.isRequired,
   onSignIn: PropTypes.func.isRequired, onSignOut: PropTypes.func.isRequired,

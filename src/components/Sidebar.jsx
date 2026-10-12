@@ -92,6 +92,17 @@ const Sidebar = ({
             placeholder="Search chats"
             aria-label="Search chats"
           />
+          {query.trim().length > 0 && (
+            <button
+              type="button"
+              className="icon-btn icon-btn-sm search-clear-btn"
+              onClick={() => setQuery('')}
+              aria-label="Clear search"
+              title="Clear search"
+            >
+              <Icon name="x" size={14} />
+            </button>
+          )}
         </div>
       </div>
 

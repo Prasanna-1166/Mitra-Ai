@@ -26,7 +26,7 @@ export function handleRelayConnection({
   repo,
   UpstreamWebSocket,
   timers = defaultTimers,
-  log = () => {},
+  log = (_event = '', _detail = '') => {},
 }) {
   const isGuest = !subject.userId;
   const usageArgs = {

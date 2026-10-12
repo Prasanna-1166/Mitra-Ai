@@ -3,7 +3,7 @@
 -- NOT executed in the environment this repository was authored in.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(46);
+select plan(54);
 
 -- two users and one guest session
 insert into auth.users (id, email) values
@@ -20,6 +20,9 @@ select lives_ok($$insert into public.conversations (id, user_id, title) values (
 select lives_ok($$insert into public.messages (conversation_id, user_id, client_id, role, content) values ('c1111111-1111-4111-8111-111111111111', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'd1111111-1111-4111-8111-111111111111', 'user', 'hello from A')$$, 'A can add a message');
 select lives_ok($$insert into public.user_memories (id, user_id, content) values ('e1111111-1111-4111-8111-111111111111', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'A prefers Python')$$, 'A can create a memory');
 select lives_ok($$insert into public.user_settings (user_id, response_depth) values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'detailed')$$, 'A can create settings');
+select lives_ok($$insert into public.profiles (id, display_name) values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Alice') on conflict (id) do update set display_name = 'Alice'$$, 'A can initialize or update their profile');
+select lives_ok($$update public.profiles set display_name = 'Alice Wonder' where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'$$, 'A can update their profile');
+select throws_ok($$update public.profiles set id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'$$, '42501', null, 'A cannot change profile id');
 
 select throws_ok($$update public.conversations set user_id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' where id = 'c1111111-1111-4111-8111-111111111111'$$, '42501', null, 'A cannot transfer ownership of a conversation (column grant)');
 select throws_ok($$update public.conversations set updated_at = now() where id = 'c1111111-1111-4111-8111-111111111111'$$, '42501', null, 'A cannot edit server-managed conversation columns');
@@ -40,12 +43,14 @@ select is((select count(*)::int from public.conversations), 0, 'B sees none of A
 select is((select count(*)::int from public.messages), 0, 'B sees none of A''s messages');
 select is((select count(*)::int from public.user_memories), 0, 'B sees none of A''s memories');
 select is((select count(*)::int from public.user_settings), 0, 'B sees none of A''s settings');
+select is((select count(*)::int from public.profiles where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'), 0, 'B sees none of A''s profile');
 select is((select count(*)::int from public.search_conversations('secret')), 0, 'B cannot find A''s conversation by searching');
 
 select throws_ok($$insert into public.conversations (user_id, title) values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'forged')$$, '42501', null, 'B cannot create a conversation owned by A');
 select throws_ok($$insert into public.messages (conversation_id, user_id, role, content) values ('c1111111-1111-4111-8111-111111111111', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'user', 'forged')$$, '42501', null, 'B cannot add a message as A');
 select throws_ok($$insert into public.messages (conversation_id, user_id, role, content) values ('c1111111-1111-4111-8111-111111111111', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'user', 'injected')$$, '23503', null, 'B cannot add a message to A''s conversation under their own id (composite FK)');
 select throws_ok($$insert into public.user_memories (user_id, content) values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'forged memory')$$, '42501', null, 'B cannot create a memory for A');
+select throws_ok($$insert into public.profiles (id, display_name) values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'forged')$$, '42501', null, 'B cannot create a profile for A');
 
 with u as (update public.conversations set title = 'hacked' where id = 'c1111111-1111-4111-8111-111111111111' returning 1)
 select is((select count(*)::int from u), 0, 'B''s update of A''s conversation affects no rows');
@@ -57,6 +62,8 @@ with u as (update public.user_memories set enabled = false where id = 'e1111111-
 select is((select count(*)::int from u), 0, 'B cannot change A''s memory');
 with d as (delete from public.user_memories where id = 'e1111111-1111-4111-8111-111111111111' returning 1)
 select is((select count(*)::int from d), 0, 'B cannot delete A''s memory');
+with u as (update public.profiles set display_name = 'hacked' where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' returning 1)
+select is((select count(*)::int from u), 0, 'B cannot update A''s profile');
 
 -- server-only objects are unreachable for signed-in users
 select throws_ok($$select * from public.guest_sessions$$, '42501', null, 'authenticated cannot read guest_sessions');
@@ -69,6 +76,7 @@ reset role;
 set local role anon;
 select throws_ok($$select * from public.conversations$$, '42501', null, 'anon cannot read conversations');
 select throws_ok($$select * from public.user_memories$$, '42501', null, 'anon cannot read memories');
+select throws_ok($$select * from public.profiles$$, '42501', null, 'anon cannot read profiles');
 
 -- ------------------------------------------------- A still has their data
 reset role;
@@ -101,6 +109,7 @@ select is((select count(*)::int from public.conversations where user_id = 'aaaaa
 select is((select count(*)::int from public.messages where user_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'), 0, 'account deletion cascades to messages');
 select is((select count(*)::int from public.user_memories where user_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'), 0, 'account deletion cascades to memories');
 select is((select count(*)::int from public.usage_events where user_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'), 0, 'account deletion cascades to usage records');
+select is((select count(*)::int from public.profiles where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'), 0, 'account deletion cascades to profiles');
 
 select * from finish();
 rollback;

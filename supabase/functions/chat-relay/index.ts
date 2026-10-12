@@ -8,6 +8,8 @@ import { handleRelayConnection } from '../_shared/relay-core.js';
 import { adminClient, sha256 } from '../_shared/edge.ts';
 import { createRepo } from '../_shared/db.ts';
 
+declare const Deno: any;
+
 Deno.serve(async (req: Request) => {
   if ((req.headers.get('upgrade') ?? '').toLowerCase() !== 'websocket') {
     return new Response('Expected a WebSocket connection', { status: 426 });
@@ -50,7 +52,7 @@ Deno.serve(async (req: Request) => {
       repo: createRepo(admin),
       UpstreamWebSocket: WebSocket,
       // Log event names and error messages only, never prompts, answers or tokens.
-      log: (event: string, detail?: string) => console.error(`chat-relay ${event}${detail ? `: ${detail}` : ''}`),
+      log: (event?: string, detail?: string) => console.error(`chat-relay ${event ?? ''}${detail ? `: ${detail}` : ''}`),
     });
     return response;
   } catch (err) {

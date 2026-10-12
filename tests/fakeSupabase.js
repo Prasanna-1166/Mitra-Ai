@@ -3,27 +3,70 @@
 // the composite foreign key, column-level update grants, ordering, cascades) so
 // the services and the controller can be tested. It is NOT Supabase: the real
 // row-level security is covered only by supabase/tests/rls.test.sql.
-const OWNED = ['conversations', 'messages', 'user_memories', 'user_settings'];
+const OWNED = ['conversations', 'messages', 'user_memories', 'user_settings', 'profiles'];
 const UPDATABLE = {
   conversations: ['title', 'title_source'],
   user_memories: ['content', 'category', 'enabled'],
   user_settings: ['response_depth', 'memory_enabled', 'auto_memory'],
   messages: [],
+  profiles: ['display_name', 'avatar_url'],
 };
 const UNIQUE = {
   conversations: [['id'], ['user_id', 'import_key']],
   messages: [['id'], ['conversation_id', 'client_id']],
   user_memories: [['id']],
   user_settings: [['user_id']],
+  profiles: [['id']],
 };
 
 let counter = 0;
 const uuid = () => `00000000-0000-4000-8000-${String(++counter).padStart(12, '0')}`;
 const err = (code, message) => ({ code, message });
 
+class FakeStorage {
+  constructor(db) {
+    this.db = db;
+    this.buckets = { avatars: {} };
+  }
+  from(bucket) {
+    const self = this;
+    return {
+      async upload(path, file) {
+        if (!self.db.uid) return { data: null, error: err('42501', 'unauthorized') };
+        const folder = path.split('/')[0];
+        if (folder !== self.db.uid) return { data: null, error: err('42501', 'permission denied for storage path') };
+        self.buckets[bucket] = self.buckets[bucket] || {};
+        self.buckets[bucket][path] = file;
+        return { data: { path }, error: null };
+      },
+      async remove(paths) {
+        if (!self.db.uid) return { data: null, error: err('42501', 'unauthorized') };
+        self.buckets[bucket] = self.buckets[bucket] || {};
+        for (const p of paths) {
+          delete self.buckets[bucket][p];
+        }
+        return { data: paths, error: null };
+      },
+      async createSignedUrl(path) {
+        if (!self.db.uid) return { data: null, error: err('42501', 'unauthorized') };
+        return { data: { signedUrl: `https://fake-storage.supabase.co/${bucket}/${path}?token=signed` }, error: null };
+      },
+      async list(folder) {
+        self.buckets[bucket] = self.buckets[bucket] || {};
+        const prefix = `${folder}/`;
+        const matches = Object.keys(self.buckets[bucket])
+          .filter((k) => k.startsWith(prefix))
+          .map((k) => ({ name: k.slice(prefix.length) }));
+        return { data: matches, error: null };
+      },
+    };
+  }
+}
+
 export class FakeSupabase {
   constructor() {
-    this.tables = { conversations: [], messages: [], user_memories: [], user_settings: [] };
+    this.tables = { conversations: [], messages: [], user_memories: [], user_settings: [], profiles: [] };
+    this.storage = new FakeStorage(this);
     this.uid = null;
     this.seq = 0;
     this.clock = 0;
@@ -52,6 +95,7 @@ export class FakeSupabase {
   }
   // Rows as another account would see them (for isolation assertions).
   rowsOf(table, uid) {
+    if (table === 'profiles') return this.tables.profiles.filter((r) => r.id === uid);
     return this.tables[table].filter((r) => r.user_id === uid);
   }
 }
@@ -92,7 +136,8 @@ class Query {
     else if (this.op === 'insert' || this.op === 'upsert') {
       for (const input of this.rows) {
         const row = { ...input };
-        if (OWNED.includes(table) && row.user_id !== db.uid) return { data: null, error: err('42501', 'new row violates row-level security policy') };
+        const ownerId = table === 'profiles' ? row.id : row.user_id;
+        if (OWNED.includes(table) && ownerId !== db.uid) return { data: null, error: err('42501', 'new row violates row-level security policy') };
         const conflictCols = this.opts?.onConflict?.split(',');
         const clash = rows.find((r) => UNIQUE[table].some((cols) => cols.every((c) => row[c] != null && r[c] === row[c])));
         if (clash) {
@@ -122,6 +167,12 @@ class Query {
           Object.assign(row, { id: row.id ?? uuid(), category: row.category ?? 'other', source: row.source ?? 'user', enabled: true, created_at: db.now(), updated_at: db.now() });
         } else if (table === 'user_settings') {
           Object.assign(row, { response_depth: 'balanced', memory_enabled: true, auto_memory: true, ...row });
+        } else if (table === 'profiles') {
+          row.id = row.id ?? db.uid;
+          row.avatar_url = row.avatar_url ?? null;
+          row.created_at = row.created_at ?? db.now();
+          row.updated_at = db.now();
+          if (row.display_name && row.display_name.length > 60) return { data: null, error: err('23514', 'check violation') };
         }
         rows.push(row);
         result.push(row);
@@ -152,7 +203,7 @@ class Query {
   }
   matching(rows) {
     const { db, table } = this;
-    let out = rows.filter((r) => (!OWNED.includes(table) || r.user_id === db.uid) && this.filters.every((f) => f(r)));
+    let out = rows.filter((r) => (!OWNED.includes(table) || (table === 'profiles' ? r.id === db.uid : r.user_id === db.uid)) && this.filters.every((f) => f(r)));
     if (this.orderBy) {
       const { c, ascending } = this.orderBy;
       out = [...out].sort((a, b) => (a[c] < b[c] ? -1 : a[c] > b[c] ? 1 : 0) * (ascending ? 1 : -1));

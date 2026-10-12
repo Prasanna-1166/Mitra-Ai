@@ -1,5 +1,9 @@
 // Small Deno helpers shared by the Edge Functions. No secrets are logged here.
+// deno-lint-ignore-file no-explicit-any
+// @ts-ignore Deno npm specifier resolved by Edge runtime
 import { createClient } from 'npm:@supabase/supabase-js@2';
+
+declare const Deno: any;
 
 // Service-role client: bypasses RLS. Server-side only, never sent to the browser.
 export function adminClient() {

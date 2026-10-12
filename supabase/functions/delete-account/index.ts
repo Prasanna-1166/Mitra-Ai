@@ -4,6 +4,9 @@
 import { adminClient, bearerToken, corsHeaders, json } from '../_shared/edge.ts';
 import { readConfig } from '../_shared/config.js';
 
+// deno-lint-ignore-file no-explicit-any
+declare const Deno: any;
+
 Deno.serve(async (req: Request) => {
   const cfg = readConfig(Deno.env.toObject());
   const cors = corsHeaders(req, cfg.allowedOrigins);
@@ -19,6 +22,17 @@ Deno.serve(async (req: Request) => {
     const admin = adminClient();
     const { data, error } = await admin.auth.getUser(jwt);
     if (error || !data?.user) return json({ code: 'invalid_session' }, 401, cors);
+
+    // Clean up avatar storage objects if any exist for this account
+    try {
+      const { data: files } = await admin.storage.from('avatars').list(data.user.id);
+      if (files && files.length > 0) {
+        const paths = files.map((f: { name: string }) => `${data.user.id}/${f.name}`);
+        await admin.storage.from('avatars').remove(paths);
+      }
+    } catch (storageErr) {
+      console.warn('delete-account storage cleanup note:', (storageErr as Error)?.message);
+    }
 
     const { error: deleteError } = await admin.auth.admin.deleteUser(data.user.id);
     if (deleteError) throw deleteError;

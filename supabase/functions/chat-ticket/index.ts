@@ -9,6 +9,8 @@ import { readConfig } from '../_shared/config.js';
 import { adminClient, bearerToken, corsHeaders, json, randomToken, sha256 } from '../_shared/edge.ts';
 import { createRepo } from '../_shared/db.ts';
 
+declare const Deno: any;
+
 Deno.serve(async (req: Request) => {
   const cfg = readConfig(Deno.env.toObject());
   const cors = corsHeaders(req, cfg.allowedOrigins);

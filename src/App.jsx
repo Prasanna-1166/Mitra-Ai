@@ -9,6 +9,7 @@ import ImportDialog from './components/ImportDialog';
 import InputArea from './components/InputArea';
 import LimitDialog from './components/LimitDialog';
 import MemoryBanner from './components/MemoryBanner';
+import ProfileDialog from './components/ProfileDialog';
 import SettingsDialog from './components/SettingsDialog';
 import Sidebar from './components/Sidebar';
 import UsageBadge from './components/UsageBadge';
@@ -16,6 +17,7 @@ import { config } from './config';
 import { useAccountData } from './hooks/useAccountData';
 import { useAuth } from './hooks/useAuth';
 import { useChat } from './hooks/useChat';
+import { useProfile } from './hooks/useProfile';
 import { useMediaQuery } from './hooks/useMediaQuery';
 import { useTheme } from './hooks/useTheme';
 import { conversationToMarkdown, exportFilename } from './lib/chatState';
@@ -60,12 +62,14 @@ const App = () => {
 
   const { state, controller } = useChat({ userId: user?.id ?? null, authLoading: auth.loading, onAuthProblem: handleAuthProblem });
   const account = useAccountData({ userId: user?.id ?? null, controller });
+  const profileData = useProfile({ user, supabaseClient: supabase });
 
   const [desktopCollapsed, setDesktopCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [dialog, setDialog] = useState(null); // { type: 'clear' | 'delete' | 'deleteAll', id? }
   const [authMode, setAuthMode] = useState(null); // 'signin' | 'signup' | null
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const textareaRef = useRef(null);
   const toggleRef = useRef(null);
@@ -189,10 +193,12 @@ const App = () => {
   };
   const openAuth = (mode) => {
     closeLimit();
+    setProfileOpen(false);
     setSettingsOpen(false);
     setAuthMode(mode);
   };
   const signOut = async () => {
+    setProfileOpen(false);
     setSettingsOpen(false);
     setDraft('');
     try {
@@ -207,6 +213,7 @@ const App = () => {
       publishableKey: supabasePublishableKey,
       accessToken: auth.session?.access_token,
     });
+    setProfileOpen(false);
     setSettingsOpen(false);
     await authService.signOut().catch(() => {});
     setAppNotice('Your account and its data have been deleted.');
@@ -311,6 +318,9 @@ const App = () => {
             {auth.configured && !auth.loading && (
               <AccountMenu
                 user={user}
+                profile={profileData.profile}
+                avatarUrl={profileData.avatarUrl}
+                onOpenProfile={() => setProfileOpen(true)}
                 onSignIn={() => setAuthMode('signin')}
                 onSettings={() => setSettingsOpen(true)}
                 onSignOut={signOut}
@@ -426,6 +436,8 @@ const App = () => {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         user={user}
+        profile={profileData.profile}
+        onOpenProfile={() => setProfileOpen(true)}
         usage={usage}
         limits={limits}
         account={account}
@@ -435,6 +447,17 @@ const App = () => {
         onSignOut={signOut}
         onDeleteChats={() => { setSettingsOpen(false); setDialog({ type: 'deleteAll' }); }}
         onDeleteAccount={handleDeleteAccount}
+      />
+
+      <ProfileDialog
+        open={profileOpen}
+        onClose={() => setProfileOpen(false)}
+        user={user}
+        profile={profileData.profile}
+        avatarUrl={profileData.avatarUrl}
+        onUpdateDisplayName={profileData.updateDisplayName}
+        onUploadAvatar={profileData.uploadAvatar}
+        onRemoveAvatar={profileData.removeAvatar}
       />
 
       <div className="sr-only" role="status" aria-live="polite">
