@@ -19,7 +19,7 @@ export function readConfig(env = {}) {
     requestsPerMinute: int(env.REQUESTS_PER_MINUTE, 8),
     guestSessionsPerIpPerDay: int(env.GUEST_SESSIONS_PER_IP_PER_DAY, 20),
     openrouterApiKey: env.OPENROUTER_API_KEY || '',
-    openrouterModel: env.OPENROUTER_MODEL || 'nvidia/nemotron-3.5-lightning:free',
+    openrouterModel: env.OPENROUTER_MODEL || 'liquid/lfm-2.5-2.6b:free',
     upstreamUrl: env.AI_UPSTREAM_WS_URL || 'wss://backend.buildpicoapps.com/api/chatbot/chat',
     upstreamAppId: env.AI_UPSTREAM_APP_ID || 'college-wife',
     upstreamConnectTimeoutMs: int(env.UPSTREAM_CONNECT_TIMEOUT_MS, 10000),
