@@ -26,4 +26,9 @@ export default defineConfig([
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
     },
   },
+  {
+    // Tests run in Node's built-in test runner.
+    files: ['tests/**/*.{js,jsx}'],
+    languageOptions: { globals: globals.node },
+  },
 ])

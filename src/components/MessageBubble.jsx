@@ -1,87 +1,177 @@
-import React, { useState } from 'react';
+import { Children, isValidElement, memo } from 'react';
 import PropTypes from 'prop-types';
 import Markdown from 'react-markdown';
+import Icon from './Icon';
+import { useCopy } from '../hooks/useCopy';
 
-const CodeBlock = ({ children, className }) => {
-    const [copied, setCopied] = useState(false);
-    const language = className ? className.replace('language-', '') : '';
-    const code = String(children).replace(/\n$/, '');
-
-    const handleCopy = async () => {
-        try {
-            await navigator.clipboard.writeText(code);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-        } catch (err) {
-            console.error('Failed to copy:', err);
-        }
-    };
-
-    return (
-        <div className="code-block-wrapper">
-            <div className="code-block-header">
-                <span className="code-language">{language || 'code'}</span>
-                <button
-                    onClick={handleCopy}
-                    className="copy-code-btn"
-                    aria-label="Copy code"
-                >
-                    {copied ? (
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <polyline points="20 6 9 17 4 12"></polyline>
-                        </svg>
-                    ) : (
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                        </svg>
-                    )}
-                    <span>{copied ? 'Copied!' : 'Copy'}</span>
-                </button>
-            </div>
-            <pre>
-                <code className={className}>{children}</code>
-            </pre>
-        </div>
-    );
+// Flatten react-markdown's children (a string for code) into plain text.
+const toText = (node) => {
+  if (node == null || typeof node === 'boolean') return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(toText).join('');
+  return toText(node.props?.children);
 };
 
-CodeBlock.propTypes = {
-    children: PropTypes.node,
-    className: PropTypes.string
+const COPY_LABEL = { idle: 'Copy', copied: 'Copied', failed: 'Copy failed' };
+
+const CopyButton = ({ text, label, className = '' }) => {
+  const { status, copy } = useCopy();
+  return (
+    <>
+      <button
+        type="button"
+        className={`copy-btn ${className} ${status !== 'idle' ? `is-${status}` : ''}`}
+        onClick={() => copy(text)}
+        aria-label={label}
+      >
+        <Icon name={status === 'copied' ? 'check' : 'copy'} size={14} />
+        <span aria-hidden="true">{COPY_LABEL[status]}</span>
+      </button>
+      <span className="sr-only" role="status">
+        {status === 'copied' ? 'Copied to clipboard' : status === 'failed' ? 'Copy failed' : ''}
+      </span>
+    </>
+  );
+};
+CopyButton.propTypes = {
+  text: PropTypes.string.isRequired,
+  label: PropTypes.string.isRequired,
+  className: PropTypes.string,
 };
 
-const MessageBubble = ({ role, content }) => {
-    const isUser = role === 'user';
+const CodeBlock = ({ className, children }) => {
+  const language = /language-([\w+#.-]+)/.exec(className ?? '')?.[1];
+  const code = toText(children).replace(/\n$/, '');
+  return (
+    <div className="code-block">
+      <div className="code-header">
+        <span className="code-language">{language ?? 'text'}</span>
+        <CopyButton text={code} label={`Copy ${language ?? ''} code`.replace('  ', ' ')} />
+      </div>
+      {/* focusable so keyboard users can scroll long lines */}
+      <pre tabIndex={0} aria-label={language ? `${language} code` : 'Code'}>
+        <code className={className}>{code}</code>
+      </pre>
+    </div>
+  );
+};
+CodeBlock.propTypes = { className: PropTypes.string, children: PropTypes.node };
 
+// react-markdown v10 has no `inline` prop. Fenced code always arrives wrapped
+// in <pre>, so the block container is built there; bare <code> stays inline.
+const markdownComponents = {
+  pre({ children }) {
+    const child = Children.toArray(children)[0];
+    if (isValidElement(child)) {
+      return <CodeBlock className={child.props.className}>{child.props.children}</CodeBlock>;
+    }
+    return <pre>{children}</pre>;
+  },
+  code({ className, children }) {
+    return <code className={className}>{children}</code>;
+  },
+  a({ href, children }) {
     return (
-        <div className={`message ${isUser ? 'user' : 'assistant'}`}>
-            <div className="message-content">
-                <Markdown
-                    components={{
-                        code({ node, inline, className, children, ...props }) {
-                            return inline ? (
-                                <code className={className} {...props}>
-                                    {children}
-                                </code>
-                            ) : (
-                                <CodeBlock className={className}>
-                                    {children}
-                                </CodeBlock>
-                            );
-                        }
-                    }}
-                >
-                    {content}
-                </Markdown>
-            </div>
-        </div>
+      <a href={href} target="_blank" rel="noopener noreferrer">
+        {children}
+      </a>
     );
+  },
+};
+
+const PHASE_TEXT = { connecting: 'Connecting…', generating: 'Thinking…' };
+
+export const PendingIndicator = ({ phase }) => (
+  <div className="pending">
+    <span className="pending-dots" aria-hidden="true">
+      <i />
+      <i />
+      <i />
+    </span>
+    <span>{PHASE_TEXT[phase] ?? 'Thinking…'}</span>
+  </div>
+);
+PendingIndicator.propTypes = { phase: PropTypes.string };
+
+const MessageBubble = ({ message, phase, canRetry = false, canRegenerate = false, onRetry }) => {
+  const { id, role, content, status, error } = message;
+
+  if (role === 'user') {
+    return (
+      <article className="message user" aria-label="You">
+        <div className="user-body">{content}</div>
+      </article>
+    );
+  }
+
+  const hasText = content.trim().length > 0;
+  const isPartial = hasText && (status === 'error' || status === 'stopped');
+  const isBusy = status === 'pending' || status === 'streaming';
+
+  return (
+    <article className="message assistant" aria-label="Mitra AI" aria-busy={isBusy}>
+      <div className="author">Mitra AI</div>
+
+      {status === 'pending' && <PendingIndicator phase={phase} />}
+
+      {hasText && (
+        <div className={`markdown ${isPartial ? 'is-partial' : ''}`}>
+          <Markdown components={markdownComponents}>{content}</Markdown>
+        </div>
+      )}
+
+      {status === 'error' && (
+        <div className="notice is-error" role="alert">
+          <Icon name="alert" size={16} />
+          <div className="notice-text">
+            <strong>{hasText ? 'Response incomplete' : 'Request failed'}</strong>
+            <span>{error}</span>
+          </div>
+          {canRetry && (
+            <button type="button" className="btn btn-sm" onClick={() => onRetry?.(id)}>
+              <Icon name="retry" size={14} />
+              Retry
+            </button>
+          )}
+        </div>
+      )}
+
+      {status === 'stopped' && (
+        <div className="notice is-muted">
+          <span>{hasText ? 'Generation stopped. This response is incomplete.' : 'Generation stopped.'}</span>
+        </div>
+      )}
+
+      {!isBusy && (hasText || (canRegenerate && status === 'stopped')) && (
+        <div className="message-actions">
+          {hasText && <CopyButton text={content} label="Copy response" className="action" />}
+          {canRegenerate && (
+            <button
+              type="button" className="copy-btn action" onClick={() => onRetry?.(id)}
+              aria-label="Regenerate response" title="Regenerate (uses one question from your allowance)"
+            >
+              <Icon name="retry" size={14} />
+              <span aria-hidden="true">Regenerate</span>
+            </button>
+          )}
+        </div>
+      )}
+    </article>
+  );
 };
 
 MessageBubble.propTypes = {
+  message: PropTypes.shape({
+    id: PropTypes.string.isRequired,
     role: PropTypes.oneOf(['user', 'assistant']).isRequired,
     content: PropTypes.string.isRequired,
+    status: PropTypes.string,
+    error: PropTypes.string,
+  }).isRequired,
+  phase: PropTypes.string,
+  canRetry: PropTypes.bool,
+  canRegenerate: PropTypes.bool,
+  onRetry: PropTypes.func,
 };
 
-export default MessageBubble;
+export default memo(MessageBubble);
