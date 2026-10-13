@@ -1,5 +1,5 @@
-// Small Deno helpers shared by the Edge Functions. No secrets are logged here.
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { isOriginAllowed } from './origin.js';
 
 // Service-role client: bypasses RLS. Server-side only, never sent to the browser.
 export function adminClient() {
@@ -27,7 +27,10 @@ export async function sha256(text: string): Promise<string> {
 
 export function corsHeaders(req: Request, allowedOrigins: string[]): Record<string, string> {
   const origin = req.headers.get('origin') ?? '';
-  const allow = allowedOrigins.length === 0 ? '*' : allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
+  let allow = allowedOrigins.length === 0 ? '*' : allowedOrigins[0] || '*';
+  if (origin && isOriginAllowed(origin, allowedOrigins)) {
+    allow = origin;
+  }
   return {
     'Access-Control-Allow-Origin': allow,
     'Access-Control-Allow-Headers': 'authorization, content-type, x-guest-token, apikey',
