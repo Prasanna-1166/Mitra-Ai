@@ -171,7 +171,9 @@ export function handleRelayConnection({
       });
 
       send({ type: 'accepted', usage: reservation.usage });
-      const outcome = await streamUpstream({ systemPrompt, message, state });
+      const outcome = cfg.openrouterApiKey
+        ? await streamOpenRouter({ systemPrompt, userMessage: req.message, history, state })
+        : await streamUpstream({ systemPrompt, message, state });
 
       const hasText = outcome.text.length > 0;
       let usageStatus = 'failed';
@@ -240,6 +242,101 @@ export function handleRelayConnection({
       } catch (err) {
         log('save_assistant_failed', err?.message);
         return false;
+      }
+    }
+
+    async function streamOpenRouter({ systemPrompt, userMessage, history: hist, state: s }) {
+      const messages = [{ role: 'system', content: systemPrompt }];
+      if (Array.isArray(hist)) {
+        for (const h of hist) {
+          if (h && (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string') {
+            messages.push({ role: h.role, content: h.content });
+          }
+        }
+      }
+      messages.push({ role: 'user', content: userMessage });
+
+      const controller = new AbortController();
+      active = {
+        cancel: () => {
+          s.cancelled = true;
+          try { controller.abort(); } catch {}
+        },
+      };
+      if (s.cancelled) return { type: 'cancelled', text: '' };
+
+      let text = '';
+      try {
+        const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${cfg.openrouterApiKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://mitra-ai.local',
+            'X-Title': 'Mitra AI',
+          },
+          body: JSON.stringify({
+            model: cfg.openrouterModel,
+            models: [
+              cfg.openrouterModel,
+              'liquid/lfm-2.5-2.6b:free',
+              'google/gemma-4-26b-a4b-it:free',
+            ],
+            messages,
+            stream: true,
+          }),
+          signal: controller.signal,
+        });
+
+        if (!res.ok) {
+          const errText = await res.text().catch(() => '');
+          log('openrouter_error', `HTTP ${res.status}: ${errText}`);
+          return { type: 'failed', text: '' };
+        }
+
+        const reader = res.body?.getReader();
+        if (!reader) return { type: 'failed', text: '' };
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          if (s.cancelled) {
+            try { await reader.cancel(); } catch {}
+            return { type: 'cancelled', text };
+          }
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || !trimmed.startsWith('data:')) continue;
+            const dataStr = trimmed.slice(5).trim();
+            if (dataStr === '[DONE]') {
+              return { type: text ? 'complete' : 'empty', text };
+            }
+            try {
+              const parsed = JSON.parse(dataStr);
+              const chunk = parsed.choices?.[0]?.delta?.content;
+              if (chunk) {
+                text += chunk;
+                send({ type: 'chunk', text: chunk });
+              }
+            } catch {
+              // ignore malformed line
+            }
+          }
+        }
+        return { type: text ? 'complete' : 'empty', text };
+      } catch (err) {
+        if (s.cancelled || controller.signal.aborted) {
+          return { type: 'cancelled', text };
+        }
+        log('openrouter_stream_error', err?.message);
+        return { type: 'failed', text };
       }
     }
 
