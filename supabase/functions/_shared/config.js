@@ -17,6 +17,7 @@ export function readConfig(env = {}) {
     memoryMaxItems: int(env.MEMORY_MAX_ITEMS, 12),
     memoryMaxChars: int(env.MEMORY_MAX_CHARS, 2000),
     requestsPerMinute: int(env.REQUESTS_PER_MINUTE, 8),
+    guestSessionsPerIpPerDay: int(env.GUEST_SESSIONS_PER_IP_PER_DAY, 20),
     openrouterApiKey: env.OPENROUTER_API_KEY || '',
     openrouterModel: env.OPENROUTER_MODEL || 'nvidia/nemotron-3.5-lightning:free',
     upstreamUrl: env.AI_UPSTREAM_WS_URL || 'wss://backend.buildpicoapps.com/api/chatbot/chat',

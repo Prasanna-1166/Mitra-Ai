@@ -19,6 +19,16 @@ const defaultTimers = {
   clearTimeout: (id) => globalThis.clearTimeout(id),
 };
 
+/**
+ * @param {object} params
+ * @param {any} params.socket
+ * @param {any} params.subject
+ * @param {any} params.cfg
+ * @param {any} params.repo
+ * @param {any} params.UpstreamWebSocket
+ * @param {any} [params.timers]
+ * @param {(event: string, detail?: string) => void} [params.log]
+ */
 export function handleRelayConnection({
   socket,
   subject,
@@ -260,7 +270,7 @@ export function handleRelayConnection({
       active = {
         cancel: () => {
           s.cancelled = true;
-          try { controller.abort(); } catch {}
+          try { controller.abort(); } catch { /* ignore */ }
         },
       };
       if (s.cancelled) return { type: 'cancelled', text: '' };
@@ -302,7 +312,7 @@ export function handleRelayConnection({
 
         while (true) {
           if (s.cancelled) {
-            try { await reader.cancel(); } catch {}
+            try { await reader.cancel(); } catch { /* ignore */ }
             return { type: 'cancelled', text };
           }
           const { done, value } = await reader.read();
